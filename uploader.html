@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html>
+  <meta charset="utf-8">
+  <title>Uploader</title>
+  <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.5.9/angular.min.js"></script>
+  <script src="/static/js-yaml.min.js"></script>
+  <style>
+    body {
+      font-family: 'Roboto', sans-serif;
+    }
+
+    .form {
+      border-radius: 5px;
+      border: 2px dotted #D3E4F9;
+      box-sizing: border-box;
+      display: inline-flex;
+      margin-bottom: 20px;
+      margin-top: 20px;
+      max-width: 100%;
+      padding: 10px;
+      width: 500px;
+    }
+
+    .form--dragover {
+      background-color: #cfeafe;
+    }
+
+    .form__tips {
+      margin-top: 10px;
+      font-size: smaller;
+    }
+
+    .form__tips ul {
+      margin-block-end: 0;
+      padding-inline-start: 25px;
+    }
+
+    .results {
+      column-gap: 24px;
+      display: flex;
+      flex-wrap: wrap;
+      row-gap: 24px;
+    }
+
+    .result {
+      max-width: 100%;
+      width: 500px;
+    }
+
+    .result__name,
+    .result__url {
+      overflow: hidden;
+      padding: 5px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .result__name + .result__name {
+      margin-top: 3px;
+    }
+
+    .result__status {
+      align-items: center;
+      background-color: #D3E4F9;
+      border-radius: 2px;
+      display: flex;
+      font-size: smaller;
+      justify-content: space-between;
+      padding: 5px;
+    }
+
+    .result__image {
+      background-color: #efefef;
+      background-image: radial-gradient(circle, #888 1px, rgba(0,0,0,0) 1px);
+      background-size: 20px 20px;
+      box-sizing: border-box;
+      line-height: 0;
+      padding: 5px;
+    }
+
+    .result__image a {
+      line-height: 0;
+    }
+
+    .result__image img {
+      max-width: 100%;
+    }
+
+    .snippet {
+      line-height: 0;
+      position: relative;
+    }
+
+    .snippet__buttons {
+      bottom: 0;
+      left: 0;
+      position: absolute;
+      z-index: 1;
+    }
+
+    .snippet textarea {
+      background: #efefef;
+      border: none;
+      box-sizing: border-box;
+      font-family: Monaco, monospace;
+      font-size: 11px;
+      height: 300px;
+      margin-top: 20px;
+      padding: 10px;
+      width: 500px;
+    }
+
+    .form__heading {
+      font-weight: bold;
+    }
+
+    .form__tips + .form__heading {
+      margin-top: 10px;
+    }
+
+    .form__drive {
+      margin-top: 10px;
+    }
+
+    .form__drive__input {
+      display: flex;
+      column-gap: 10px;
+      margin-top: 10px;
+    }
+
+    .form__drive__input input[type=text] {
+      flex-grow: 1;
+    }
+
+    .form__drive__input__files {
+      font-size: 11px;
+    }
+
+    .form__drive__input__files table {
+      margin-top: 10px;
+      width: 100%;
+    }
+  </style>
+  <body>
+    <div
+      ng-cloak
+      ng-controller="UploadController as ctrl"
+    >
+      <form ng-submit="ctrl.onSubmit()">
+        <input type="file" multiple="true">
+        <button type="submit">Upload</button>
+      </form>
+      <div class="form" drop-target ng-class="{'form--dragover' : ctrl.isDragging}">
+        <div>
+          <div class="form__heading">
+            Choose, drop, or paste to upload:
+          </div>
+          <div class="form__tips">
+            Tips:
+            <ul>
+              <li>Use ⌘+Ctrl+Shift+4 on Mac to quickly capture screenshots to clipboard.</li>
+              <li>Select multiple files using the "Choose files" button to bulk upload.</li>
+            </ul>
+          </div>
+          <div class="form__heading">
+            Or upload from Google Drive:
+          </div>
+          <form class="form__drive" ng-submit="ctrl.loadGoogleDriveResource(ctrl.googleDriveResourceUrl)">
+            <div>
+              <button id="authorize_button" style="display: none;">Sign in to Google Drive</button>
+              <button id="signout_button" style="display: none;">Sign out from Google Drive</button>
+            </div>
+            <div class="form__drive__input">
+              <input type="text" ng-model="ctrl.googleDriveResourceUrl" placeholder="Enter a Google Drive folder or file URL" ng-required>
+              <button type="submit">Load</button>
+            </div>
+            <div class="form__drive__input__files" ng-if="ctrl.googleDriveFiles">
+              <table>
+                <tr ng-repeat="file in ctrl.googleDriveFiles">
+                  <td>
+                    {{$index + 1}}.
+                    <a href="https://drive.google.com/file/d/{{file.id}}/view?usp=sharing">{{file.name}}</a>
+                  </td>
+                  <td>
+                    <button upload-google-drive-button ng-click="ctrl.uploadGoogleDriveFile(file.id, file.name)">Upload</button>
+                  </td>
+                </tr>
+              </table>
+              <div ng-if="ctrl.googleDriveFiles">
+                <button ng-click="ctrl.uploadAllGoogleDriveFiles()">Upload all</button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+      <div class="results">
+        <div class="result" ng-repeat="result in ctrl.results">
+          <div class="result__status" ng-if="result.status != 'success'">
+            <div>
+              {{result.status}}: {{result.name}}
+            </div>
+          </div>
+          <div ng-if="result.status == 'success'">
+            <div class="result__status">
+              <div class="result__name">
+                {{result.name}}
+              </div>
+              <div>
+                <a href="{{ctrl.baseUrl}}/{{result.fileId}}">Internal Link</a>
+                <button ng-if="result.isImage" ng-click="ctrl.copyText(result.data.serving_url)">Copy Public Link</button>
+              </div>
+            </div>
+            <div
+              ng-if="result.isImage"
+              class="result__image"
+            >
+              <a
+                ng-href="{{result.data.serving_url}}"
+              >
+                <img
+                  ng-src="{{result.data.serving_url}}"
+                >
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="snippet" ng-if="ctrl.snippet">
+        <div class="snippet__buttons">
+          <button ng-click="ctrl.snippetType = 'json'">JSON</button>
+          <button ng-click="ctrl.snippetType = 'yaml'">YAML</button>
+        </div>
+        <textarea ng-if="ctrl.snippetType != 'yaml'">{{ctrl.jsonSnippet}}</textarea>
+        <textarea ng-if="ctrl.snippetType == 'yaml'">{{ctrl.yamlSnippet}}</textarea>
+      </div>
+    </div>
+    <script>
+      var UploadController = function ($http, $element, $scope) {
+        this.el_ = $element[0];
+        this.inputEl = this
+          .el_
+          .querySelector('input[type="file"]');
+        this.baseUrl = window.location.origin;
+        this.$http = $http;
+        this.$scope = $scope;
+        this.results = {};
+        this.snippet = null;
+        this.snippetType = null;
+        this.yamlSnippet = null;
+        this.jsonSnippet = null;
+        this.isDragging = false;
+
+        document.addEventListener('paste', function (e) {
+          if (!e.clipboardData.files.length) {
+            return;
+          }[]
+            .forEach
+            .call(event.clipboardData.files, function (file) {
+              this.createSignedUrlAndUpload(file);
+            }.bind(this));
+        }.bind(this));
+
+        const dropTarget = this
+          .el_
+          .querySelector('[drop-target]');
+        dropTarget.addEventListener('dragenter', function (e) {
+          this.isDragging = true;
+          this
+            .$scope
+            .$apply();
+        }.bind(this));
+        dropTarget.addEventListener('dragleave', function (e) {
+          this.isDragging = false;
+          this
+            .$scope
+            .$apply();
+        }.bind(this));
+        dropTarget.addEventListener('dragover', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.isDragging = true;
+          this
+            .$scope
+            .$apply();
+        }.bind(this));
+        dropTarget.addEventListener('drop', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.isDragging = false;
+          this
+            .$scope
+            .$apply();
+          if (!e.dataTransfer || !e.dataTransfer.files.length) {
+            return;
+          }[]
+            .forEach
+            .call(e.dataTransfer.files, function (file) {
+              this.createSignedUrlAndUpload(file);
+            }.bind(this));
+        }.bind(this));
+      };
+
+      UploadController.prototype.loadGoogleDriveResource = function (url) {
+        if (url.includes('/folders/')) {
+          const folderId = url
+            .split('/folders/')
+            .pop()
+            .split('?')[0];
+          gapi
+            .client
+            .drive
+            .files
+            .list({'q': `"${folderId}" in parents`})
+            .then(resp => {
+              this.googleDriveFiles = resp
+                .result
+                .files
+                .filter(item => {
+                  return item
+                    .mimeType
+                    .startsWith('image') || item
+                    .mimeType
+                    .startsWith('video');
+                });
+              this
+                .$scope
+                .$apply();
+            });
+        } else if (url.includes('/file/')) {
+          const fileId = url
+            .split('/file/d/')
+            .pop()
+            .split('?')[0]
+            .replace('/view', '');
+          gapi
+            .client
+            .drive
+            .files
+            .get({'fileId': fileId})
+            .then(resp => {
+              this.googleDriveFiles = [resp.result];
+              this
+                .$scope
+                .$apply();
+            });
+        } else {
+          alert('Something went wrong. You must enter a URL to either a Google Drive folder, or individual file.')
+        }
+      }
+
+      UploadController.prototype.uploadAllGoogleDriveFiles = function () {
+        Array
+          .from(document.querySelectorAll('button[upload-google-drive-button]'))
+          .forEach((button) => {
+            button.click();
+          });
+      }
+
+      UploadController.prototype.uploadGoogleDriveFile = function (fileId, fileName) {
+        this.results[fileName] = {
+          name: fileName,
+          status: 'downloading'
+        };
+        gapi
+          .client
+          .drive
+          .files
+          .get({'alt': 'media', 'fileId': fileId})
+          .then(resp => {
+            var bytes = new Uint8Array(resp.body.length);
+            for (var i = 0; i < resp.body.length; i++) {
+              bytes[i] = resp
+                .body
+                .charCodeAt(i);
+            }
+            const file = new File([bytes], fileName, {type: resp.headers['Content-Type']});
+            this.createSignedUrlAndUpload(file);
+          });
+      };
+
+      UploadController.prototype.onSubmit = function () {
+        if (!this.inputEl.files.length) {
+          return;
+        }[]
+          .forEach
+          .call(this.inputEl.files, function (file) {
+            this.createSignedUrlAndUpload(file);
+          }.bind(this));
+      };
+
+      UploadController.prototype.upload = function (file, options) {
+        this
+          .$http
+          .put(options.uploadUrl, file, {
+            headers: {
+              'Content-Type': options.contentType
+            }
+          })
+          .success(function (result) {
+            console.log(`File was uploaded to: ${options.gsPath}`);
+            this.uploadedFileUrl = `https://storage.googleapis.com${options.gsPath}`;
+            this.finalize(file, options);
+          }.bind(this))
+          .error(function (result) {
+            this
+              .results[file.name]
+              .status = 'error';
+          }.bind(this));
+      };
+
+      UploadController.prototype.copyText = function (url) {
+        var textArea = document.createElement('textarea');
+        textArea.value = url;
+        document
+          .body
+          .appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        textArea
+          .parentNode
+          .removeChild(textArea);
+      };
+
+      UploadController.prototype.finalize = function (file, options) {
+        this
+          .$http({
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            url: '/_api/create_serving_url',
+            data: `file_id=${options.fileId}`
+          })
+          .success(function (result) {
+            this
+              .results[file.name]
+              .status = 'success';
+            this
+              .results[file.name]
+              .fileId = options.fileId;
+            this
+              .results[file.name]
+              .data = result;
+            this
+              .results[file.name]
+              .isImage = options
+              .contentType
+              .startsWith('image');
+            if (!this.snippet) {
+              this.snippet = {};
+            }
+            var newSnippet = {};
+            newSnippet[file.name] = {
+              gs_path: `gs:/${result.gs_path}`,
+              height: result.height,
+              url: result.serving_url,
+              width: result.width
+            };
+            this.snippet = Object.assign(this.snippet, newSnippet);
+            this.jsonSnippet = JSON.stringify(this.snippet, null, 2);
+            this.yamlSnippet = jsyaml.dump(jsyaml.load(this.jsonSnippet));
+          }.bind(this))
+          .error(function (result) {
+            this
+              .results[file.name]
+              .status = 'error';
+          }.bind(this));
+      }
+
+      UploadController.prototype.createSignedUrlAndUpload = function (file) {
+        let apiRoot = '/_api/create_upload_url';
+        let fileName = file.name;
+        let contentLength = file.size;
+        let path = apiRoot + '?name=' + fileName + '&content_length=' + contentLength;
+        this.results[file.name] = {
+          name: file.name,
+          status: 'working'
+        };
+        this
+          .$http
+          .get(path)
+          .success(function (resp) {
+            this.upload(file, {
+              contentType: resp['content_type'],
+              fileId: resp['file_id'],
+              gsPath: resp['gs_path'],
+              uploadUrl: resp['upload_url']
+            });
+          }.bind(this));
+        this
+          .$scope
+          .$apply();
+        console.log(this.$scope);
+      };
+
+      let app = angular.module('fileUpload', []);
+      app.controller('UploadController', UploadController);
+      angular.bootstrap(document, ['fileUpload']);
+    </script>
+
+    <script type="text/javascript">
+      // Client ID and API key from the Developer Console
+      var CLIENT_ID = '{{CLIENT_ID}}';
+      var API_KEY = '{{API_KEY}}';
+
+      // Array of API discovery doc URLs for APIs used by the quickstart
+      var DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"];
+
+      // Authorization scopes required by the API; multiple scopes can be
+      // included, separated by spaces.
+      var SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
+
+      var authorizeButton = document.getElementById('authorize_button');
+      var signoutButton = document.getElementById('signout_button');
+
+      /**
+       *  On load, called to load the auth2 library and API client library.
+       */
+      function handleClientLoad() {
+        gapi.load('client:auth2', initClient);
+      }
+
+      /**
+       *  Initializes the API client library and sets up sign-in state
+       *  listeners.
+       */
+      function initClient() {
+        gapi
+          .client
+          .init({apiKey: API_KEY, clientId: CLIENT_ID, discoveryDocs: DISCOVERY_DOCS, scope: SCOPES})
+          .then(function () {
+            // Listen for sign-in state changes.
+            gapi
+              .auth2
+              .getAuthInstance()
+              .isSignedIn
+              .listen(updateSigninStatus);
+
+            // Handle the initial sign-in state.
+            updateSigninStatus(gapi.auth2.getAuthInstance().isSignedIn.get());
+            authorizeButton.onclick = handleAuthClick;
+            signoutButton.onclick = handleSignoutClick;
+          }, function (error) {
+            appendPre(JSON.stringify(error, null, 2));
+          });
+      }
+
+      /**
+       *  Called when the signed in status changes, to update the UI
+       *  appropriately. After a sign-in, the API is called.
+       */
+      function updateSigninStatus(isSignedIn) {
+        if (isSignedIn) {
+          authorizeButton.style.display = 'none';
+          signoutButton.style.display = 'block';
+          // listFiles();
+        } else {
+          authorizeButton.style.display = 'block';
+          signoutButton.style.display = 'none';
+        }
+      }
+
+      /**
+       *  Sign in the user upon button click.
+       */
+      function handleAuthClick(event) {
+        gapi
+          .auth2
+          .getAuthInstance()
+          .signIn();
+      }
+
+      /**
+       *  Sign out the user upon button click.
+       */
+      function handleSignoutClick(event) {
+        gapi
+          .auth2
+          .getAuthInstance()
+          .signOut();
+      }
+    </script>
+
+    <script async defer src="https://apis.google.com/js/api.js"
+      onload="this.onload=function(){};handleClientLoad()"
+      onreadystatechange="if (this.readyState === 'complete') this.onload()"></script>
